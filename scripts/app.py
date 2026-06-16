@@ -7,6 +7,7 @@ from scripts.tilemap import Tilemap
 from scripts import sprite
 import coloredlogs
 from inputs import get_gamepad
+from assets.sprites import sprites
 
 
 __version__ = "0.0.0 PT"
@@ -63,8 +64,8 @@ class App:
     '''The main app.''' # help string
     def __init__(self, tilemap: Tilemap):
         pygame.init()
-        icon_image = pygame.image.load('my_icon.png')
-        pygame.display.set_icon(icon_image)
+        #icon_image = pygame.image.load('my_icon.png')
+        #pygame.display.set_icon(icon_image)
         pygame.display.set_caption("Raincloud game engine")
         flags = RESIZABLE
         self.screen = pygame.display.set_mode((800, 600))
@@ -75,18 +76,20 @@ class App:
         self.tilemap = tilemap
         self.camera = Camera(self.tilemap.width, self.tilemap.height)
         self.party = sprite.Party()
-        self.player = sprite.Sprite(sprite.Spritesheet('niko', 4), 'Player', 5, 5, self.tilemap)
+        self.player = sprites['player'](self.tilemap)
         self.party.leader = self.player
         self.sprites = [self.player]
         self.clock = pygame.time.Clock()
         self.joystick = pygame.joystick.Joystick(0)
         self.joystick.rumble(240, 500, 5)
-        ...
+        self.script = None
+        self.just_pressed = []
     
     # function is defined with _ at the start to show that this function isnt meant to be used out of this class
     def _keydown(self, event):
         for key, value in self.keybinds.items():
             if event.key in value:
+                self.just_pressed.append(key)
                 self.pressed_keys.append(key)
                 logger.debug(key)
 
@@ -99,6 +102,7 @@ class App:
     def _joybuttondown(self, event):
         for key, value in self.gamepad_keybinds.items():
             if event.button in value:
+                self.just_pressed.append(key)
                 self.pressed_keys.append(key)
                 logger.debug(key)
 
@@ -135,8 +139,8 @@ class App:
 
     def run(self):
         self.running = True
-
         while self.running:
+            self.just_pressed.clear()
             dt = self.clock.tick(60) / 1000.0
 
             # ---------------- EVENTS ----------------
@@ -173,6 +177,9 @@ class App:
                 self.player.move(1,0)
             else:
                 self.player.move(0,0)
+            
+            if 'confirm' in self.just_pressed and not self.script:
+                self.script = self.player.interact()
 
             # ---------------- UPDATE ----------------
 
@@ -187,6 +194,12 @@ class App:
                 self.screen.get_width(),
                 self.screen.get_height()
             )
+
+            if self.script:
+                try:
+                    next(self.script)
+                except StopIteration:
+                    self.script = None
 
             # ---------------- RENDER ----------------
 
@@ -204,6 +217,12 @@ class App:
             for spr in self.sprites:
                 depth = spr.rect.bottom
                 render_list.append((depth, spr))
+
+            for y, yc in enumerate(self.tilemap.tile_sprites):
+                for x, spr in enumerate(yc):
+                    if spr:
+                        depth = spr.rect.bottom
+                        render_list.append((depth, spr))
 
             render_list.sort(key=lambda x: x[0])
 
