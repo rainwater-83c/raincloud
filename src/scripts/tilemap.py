@@ -56,7 +56,7 @@ class Tilemap:
 
     def render(self):
         for p in range(max(self.tileset.module.priority)+1):
-            for z, zc in enumerate(self.layers):
+            for z, zc in reversed(list(enumerate(self.layers))):
                 for y, yc in enumerate(zc):
                     for x, xc in enumerate(yc):
                         tile = self.tileset.tile(xc)

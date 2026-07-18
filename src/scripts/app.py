@@ -5,7 +5,8 @@ from pygame.locals import *
 import logging
 import sys
 from scripts.tilemap import Tilemap
-from scripts import sprite, sound
+from scripts import sprite, sound, reusable
+from assets import icon
 import coloredlogs
 #from inputs import get_gamepad
 from assets.sprites import sprites
@@ -64,7 +65,8 @@ class App:
     '''The main app.''' # help string
     def __init__(self, tilemap: Tilemap):
         pygame.init()
-        icon_image = pygame.image.load('icon.ico')
+
+        icon_image = reusable.bytes_to_image(__import__('assets.icon', fromlist='icon').content)
         pygame.display.set_icon(icon_image)
         pygame.display.set_caption("Raincloud game engine")
         flags = RESIZABLE

@@ -53,8 +53,8 @@ coloredlogs.install(level='DEBUG' if True else 'LOG', logger=logger,fmt="%(ascti
 if __name__ == "__main__":
     logger.debug(f"main script ran! version: {__version__}")
     app = app.App(tilemap.Tilemap('main'))  # make a new app object
-    modloader = modloader.Modloader(app)
-    modloader.inject()
+    modloader = modloader.Modloader(app) # init the modloader
+    modloader.inject() # inject the mods into the app object
     app.run()  # run the app
     del app
     os._exit(0)
