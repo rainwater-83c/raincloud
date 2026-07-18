@@ -24,8 +24,7 @@ class Tilemap:
     # a tilemap is a matrix of 'tiles' that makes the game map
     def __init__(self, name:str):
         self.name = name
-        self.path = Path(f"assets/tilemaps/{name}.py").absolute()
-        self.module = reusable.path_to_module(self.path, FORMAT)
+        self.module = __import__(f"assets.tilemaps.{name}", fromlist=[name])
         self.tileset = tileset.Tileset(self.module.tileset)
         self.matrix = self.module.content
         self.entities = self.matrix[1]

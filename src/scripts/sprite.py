@@ -9,7 +9,6 @@ import coloredlogs
 from pathlib import Path
 from scripts import reusable, tilemap
 
-
 __version__ = "0.0.0 PT"
 
 logger = logging.getLogger(__name__)
@@ -24,8 +23,7 @@ class Spritesheet:
     def __init__(self, name: str, frames: int):
         self.name = name
         self.frames = frames
-        self.path = Path(f"assets/spritesheets/{name}.py").absolute()
-        self.module = reusable.path_to_module(self.path, FORMAT)
+        self.module = __import__(f"assets.spritesheets.{name}", fromlist=[name])
         self.image = reusable.bytes_to_image(self.module.content)
 
     def surface(self, direction: int, frame: int):
@@ -35,11 +33,12 @@ class Spritesheet:
 class Sprite(pygame.sprite.Sprite):
     '''An event or object that moves or is interactable. Also known as an entity.'''
 
-    def __init__(self, spritesheet: Spritesheet, name: str, x: int, y: int, tilemap, direction: int=0, speed: int=1.25):
+    def __init__(self, spritesheet: Spritesheet, name: str, x: int, y: int, tilemap, direction: int=0, speed: int=1.25, health: int=3):
         super().__init__()
         self.path = name
         self.spritesheet = spritesheet
         self.tilemap = tilemap
+        self.health = health
         self.grid_x = x
         self.grid_y = y
         self.target_x = None

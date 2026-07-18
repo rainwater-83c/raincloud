@@ -20,6 +20,16 @@ def bytes_to_image(bytes):
     image_surface = pygame.image.load(image_stream)
     return image_surface
 
+def bytes_to_music(bytes):
+    audio_stream = io.BytesIO(bytes)
+    audio = pygame.mixer.music.load(audio_stream)
+    return audio
+
+def bytes_to_audio(bytes):
+    audio_stream = io.BytesIO(bytes)
+    audio = pygame.mixer.Sound(audio_stream)
+    return audio
+
 def path_to_module(path, format):
     module_name = path.stem
     file_path = path

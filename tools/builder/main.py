@@ -1,1 +1,0 @@
-'''The compiler, run this to build the project.'''

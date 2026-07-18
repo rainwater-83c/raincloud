@@ -25,13 +25,10 @@ class Tileset:
     # a tileset is an image with textures for tiles, also contains priority data.
     def __init__(self, name:str):
         self.name = name
-        self.path = Path(f"assets/tilesets/{name}.py").absolute()
-        self.module = reusable.path_to_module(self.path, FORMAT)
+        self.module = __import__(f"assets.tilesets.{name}", fromlist=[name])
         self.image = reusable.bytes_to_image(self.module.content)
         self.tile_size = self.module.tile_size
         self.dimensions = (self.image.get_size()[0]/self.tile_size, self.image.get_size()[1]/self.tile_size)
-        
-        
     
     def tile(self, tile):
         return Tile(self, tile)
@@ -45,4 +42,3 @@ class Tile:
         self.row = tile//self.tileset.dimensions[0]
         self.rect = pygame.rect.Rect((self.column*self.size, self.row*self.size), (self.size, self.size))
         self.surface = self.tileset.image.subsurface(self.rect)
-

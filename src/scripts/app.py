@@ -3,8 +3,9 @@
 import pygame
 from pygame.locals import *
 import logging
+import sys
 from scripts.tilemap import Tilemap
-from scripts import sprite
+from scripts import sprite, sound
 import coloredlogs
 #from inputs import get_gamepad
 from assets.sprites import sprites
@@ -59,18 +60,15 @@ class Camera:
         self.offset_y = max(0, min(self.offset_y, self.height - screen_h))
         return self
 
-
-
-
 class App:
     '''The main app.''' # help string
     def __init__(self, tilemap: Tilemap):
         pygame.init()
-        #icon_image = pygame.image.load('my_icon.png')
-        #pygame.display.set_icon(icon_image)
+        icon_image = pygame.image.load('icon.ico')
+        pygame.display.set_icon(icon_image)
         pygame.display.set_caption("Raincloud game engine")
         flags = RESIZABLE
-        self.screen = pygame.display.set_mode((800, 600))
+        self.screen = pygame.display.set_mode((720,480))
         self.running = False
         self.keybinds = DEFAULT_KEYBINDS
         self.gamepad_keybinds = DEFAULT_GAMEPAD_KEYBINDS
@@ -83,10 +81,15 @@ class App:
         self.sprites = [self.player]
         self.clock = pygame.time.Clock()
         self.joystick = pygame.joystick.Joystick(0)
-        self.joystick.rumble(240, 500, 5)
         self.script = None
         self.just_pressed = []
-
+        self.menu = None
+        self.fps = 0
+        self.frame_times = []
+        self.max_tracked_frames = 100
+        self.bgm = sound.BGM()
+        self.sfx = sound.SFX()
+        self.font =  pygame.font.SysFont('Arial', 30)
         self.events = {}
         self.keys = {}
         self.oncekeys = {}
@@ -97,7 +100,17 @@ class App:
         self.running = True
         while self.running:
             self.just_pressed.clear()
-            dt = self.clock.tick(60) / 1000.0
+            dt = self.clock.tick_busy_loop(1440) / 1000.0
+            if dt > 0:
+                self.frame_times.append(dt)
+            if len(self.frame_times) > self.max_tracked_frames:
+                self.frame_times.pop(0)
+
+            if self.frame_times:
+                avg_dt = sum(self.frame_times) / len(self.frame_times)
+                self.fps = 1/ avg_dt
+            else:
+                self.fps = 0
 
             # Events
 
@@ -175,6 +188,11 @@ class App:
                 (-self.camera.offset_x, -self.camera.offset_y)
             )
 
+            self.screen.blit(self.font.render(str(round(self.fps)), True, (255,255,255)), (0,0))
+
             pygame.display.flip()
 
+        pygame.mixer.quit()
+        pygame.display.quit()
         pygame.quit()
+        
