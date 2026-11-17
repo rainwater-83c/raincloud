@@ -51,6 +51,6 @@ class Font:
             x += advance + spacing
         return text_surface
 
-    def set_palette(self, white, black=(0, 0, 0, 0)) -> None:
+    def set_palette(self, white, black) -> None:
         """Change the font's white and black colors."""
         self.font_asset.set_palette(white, black)

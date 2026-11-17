@@ -35,6 +35,14 @@ def main():
     app = App(tilemap, core_assets, core_loader.config)
     core_loader.install(app)
 
+    # Merge settings menu definitions into the app's menu definitions.
+    settings_module = core_assets.get("settings")
+    if settings_module is not None:
+        settings_menus = getattr(settings_module, "MENUS", {})
+        for name, menu in settings_menus.items():
+            if menu is not None:
+                app.menu_definitions[name] = menu
+
     modloader = Modloader(app)
     modloader.inject()
     app.run()

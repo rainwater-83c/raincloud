@@ -37,7 +37,7 @@ def bytes_to_audio(bytes):
     audio = pygame.mixer.Sound(audio_stream)
     return audio
 
-def path_to_module(path, format):
+def path_to_module(path, format=None):
     module_name = path.stem
     file_path = path
     spec = importlib.util.spec_from_file_location(module_name, file_path)

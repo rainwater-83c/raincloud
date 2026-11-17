@@ -1,6 +1,8 @@
 '''UI texture generation and menu controller.'''
 
 import io
+import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Callable
@@ -40,11 +42,26 @@ class Button:
 
 
 @dataclass(frozen=True)
+class Slider:
+    """A horizontal slider control with a label, value range, and change callback."""
+
+    label: str
+    min_value: float = 0.0
+    max_value: float = 1.0
+    step: float = 0.1
+    default: float = 0.5
+    action: Callable | None = None
+    matrix: Matrix | None = None
+    colors: Palette | None = None
+
+
+@dataclass(frozen=True)
 class Menu:
     title: str
     matrix: Matrix
     buttons: tuple[Button, ...]
     colors: Palette
+    sliders: tuple[Slider, ...] = ()
     corner_type: str = "rounded"
     edge_style: str = "straight"
     button_matrix: Matrix = (
@@ -70,6 +87,18 @@ class Menu:
         (82, 153, 126, 245),
         (121, 186, 152, 245),
         (168, 216, 184, 245),
+        (225, 245, 230, 245),
+    )
+    slider_colors: Palette = (
+        (60, 75, 95, 235),
+        (90, 110, 135, 235),
+        (120, 145, 170, 235),
+        (220, 232, 240, 235),
+    )
+    selected_slider_colors: Palette = (
+        (70, 90, 110, 245),
+        (100, 125, 150, 245),
+        (140, 170, 200, 245),
         (225, 245, 230, 245),
     )
 
@@ -217,6 +246,179 @@ class GUITexture:
 _default_gui = GUITexture()
 
 
+DEFAULT_DIALOGUE_COLORS = (
+    (22, 30, 42, 245),
+    (28, 38, 52, 245),
+    (38, 50, 66, 245),
+    (54, 68, 84, 245),
+    (75, 91, 108, 245),
+    (109, 127, 144, 245),
+    (160, 177, 191, 245),
+    (232, 240, 245, 245),
+)
+DEFAULT_DIALOGUE_TEXT_COLOR = (245, 248, 250)
+INLINE_FONT_PATTERN = re.compile(r"<([^<>|]*)\|([^<>|]*)>")
+
+
+class DialogueBox:
+    def __init__(self, app, entity, location, text, font, colors=None):
+        if location not in ("top", "bottom", "middle"):
+            raise ValueError("Dialogue location must be top, bottom, or middle")
+
+        self.app = app
+        self.entity = entity
+        self.location = location
+        self.text_color = DEFAULT_DIALOGUE_TEXT_COLOR
+        self.panel_colors = DEFAULT_DIALOGUE_COLORS
+        if isinstance(colors, dict):
+            self.text_color = colors.get("text") or self.text_color
+            self.panel_colors = colors.get("panel") or self.panel_colors
+        elif colors is not None:
+            if len(colors) == len(SHADE_VALUES):
+                self.panel_colors = colors
+            else:
+                self.text_color = colors
+
+        self.fonts = dict(getattr(app, "dialogue_fonts", {}))
+        if isinstance(font, dict):
+            self.fonts.update(font)
+            self.font = self._resolve_font(
+                font.get("default", self.fonts.get("font"))
+            )
+        else:
+            self.font = self._resolve_font(font)
+        if self.font is None:
+            raise ValueError("Dialogue needs a default font")
+
+        self.lines = self._layout_text(text)
+        content_width = max((sum(glyph.get_width() for glyph in line) for line in self.lines), default=1)
+        line_height = max((glyph.get_height() for line in self.lines for glyph in line), default=1)
+        padding_x = 12
+        padding_y = 8
+        columns = max(3, math.ceil((content_width + padding_x * 2) / GUI_TILE_SIZE))
+        rows = max(3, math.ceil((line_height * max(1, len(self.lines)) + padding_y * 2) / GUI_TILE_SIZE))
+        matrix = tuple(tuple(1 for _ in range(columns)) for _ in range(rows))
+        self.panel = make_gui_texture(matrix, self.panel_colors, "rounded", "straight")
+        self.padding_x = padding_x
+        self.padding_y = padding_y
+        self.line_height = line_height
+
+    def _resolve_font(self, font):
+        if isinstance(font, str):
+            try:
+                return self.fonts[font]
+            except KeyError as error:
+                raise KeyError(f"Unknown dialogue font: {font}") from error
+        return font
+
+    def _render_character(self, font, character):
+        if character == "\n":
+            return pygame.Surface((1, 1), pygame.SRCALPHA, 32)
+        if callable(getattr(font, "print", None)):
+            return font.print(character, space_length=4)
+        if isinstance(font, pygame.font.Font):
+            return font.render(character, True, self.text_color)
+        raise TypeError("Inline text fonts must provide print() or be a pygame font")
+
+    def _render_glyph(self, font, symbol):
+        if callable(getattr(font, "get_symbol", None)):
+            return font.get_symbol(symbol)
+        if not callable(getattr(font, "get_glyph", None)):
+            return None
+
+        symbol_map = getattr(font, "SYMBOL_TO_INDEX", {})
+        if symbol in symbol_map:
+            glyph_index = symbol_map[symbol]
+        elif len(symbol) == 1:
+            glyph_index = ord(symbol)
+        else:
+            try:
+                glyph_index = int(symbol)
+            except ValueError as error:
+                raise ValueError(
+                    f"Glyph {symbol!r} is not numeric and has no SYMBOL_TO_INDEX entry"
+                ) from error
+        return font.get_glyph(glyph_index)
+
+    def _text_glyphs(self, font, text):
+        if callable(getattr(font, "get_glyph", None)) or callable(getattr(font, "get_symbol", None)):
+            if text == " ":
+                return [self._render_character(self.font, text)]
+            try:
+                glyph_index = int(text)
+            except ValueError:
+                return [self._render_glyph(font, character) for character in text]
+            return [font.get_glyph(glyph_index)]
+        return [self._render_character(font, character) for character in text]
+
+    def _layout_text(self, text):
+        matches = list(INLINE_FONT_PATTERN.finditer(text))
+        runs = []
+        start = 0
+        glyph_font = self.fonts.get("glyph")
+        glyph_components = getattr(glyph_font, "GLYPH_COMPONENT_TO_INDEX", {})
+        for match in matches:
+            if match.start() > start:
+                runs.append((self.font, text[start:match.start()], "text"))
+            left = match.group(1).strip()
+            right = match.group(2).strip()
+            if left.upper() in glyph_components and right.upper() in glyph_components:
+                runs.append((glyph_font, (left, right), "pair"))
+            elif left in self.fonts:
+                runs.append((self._resolve_font(left), right, "font"))
+            elif glyph_font is not None:
+                runs.append((glyph_font, (left, right), "pair"))
+            else:
+                raise KeyError(f"Unknown inline font or glyph pair: <{left}|{right}>")
+            start = match.end()
+        if start < len(text) or not runs:
+            runs.append((self.font, text[start:], "text"))
+
+        max_width = max(1, self.app.screen.get_width() - 48)
+        lines = [[]]
+        line_widths = [0]
+        for run_font, run_text, run_type in runs:
+            if run_type == "pair":
+                characters = ("",)
+                glyphs = (run_font.get_glyph_pair(*run_text),)
+            else:
+                characters = run_text
+                glyphs = (
+                    self._text_glyphs(run_font, run_text)
+                    if run_type == "font"
+                    else [self._render_character(run_font, char) for char in run_text]
+                )
+            for character, glyph in zip(characters, glyphs):
+                if character == "\n":
+                    lines.append([])
+                    line_widths.append(0)
+                    continue
+                if line_widths[-1] and line_widths[-1] + glyph.get_width() > max_width:
+                    lines.append([])
+                    line_widths.append(0)
+                lines[-1].append(glyph)
+                line_widths[-1] += glyph.get_width()
+        return lines
+
+    def render(self, screen):
+        screen_rect = screen.get_rect()
+        panel_rect = self.panel.get_rect(center=screen_rect.center)
+        if self.location == "top":
+            panel_rect.midtop = (screen_rect.centerx, 12)
+        elif self.location == "bottom":
+            panel_rect.midbottom = (screen_rect.centerx, screen_rect.bottom - 12)
+
+        screen.blit(self.panel, panel_rect)
+        y = panel_rect.top + self.padding_y
+        for line in self.lines:
+            line_width = sum(glyph.get_width() for glyph in line)
+            x = panel_rect.left + (panel_rect.width - line_width) // 2
+            for glyph in line:
+                screen.blit(glyph, (x, y + self.line_height - glyph.get_height()))
+                x += glyph.get_width()
+            y += self.line_height
+
+
 def make_gui_texture(
     matrix: Sequence[Sequence[int]],
     colors: Sequence[tuple[int, ...] | None],
@@ -248,6 +450,7 @@ class MenuController:
         self.corner_type = self.definition.corner_type
         self.edge_style = self.definition.edge_style
         self.colors = self.definition.colors
+        self.bitmap_font = app.bitmap_font
         self.font = pygame.font.Font(None, 24)
         self.title_font = pygame.font.Font(None, 32)
         self.button_surfaces = []
@@ -261,6 +464,13 @@ class MenuController:
                 self.gui.render(matrix, colors, corner_type, edge_style),
                 self.gui.render(matrix, selected_colors, corner_type, edge_style),
             ))
+
+        # Slider state
+        self.sliders = self.definition.sliders
+        self.slider_values = [s.default for s in self.sliders]
+        self.slider_rects = []
+        self.active_slider = None  # index of slider currently being adjusted
+        self.total_items = len(self.items) + len(self.sliders)
 
         self.matrix = self.definition.matrix
         self.panel_surface = self.gui.render(
@@ -278,13 +488,29 @@ class MenuController:
                 if event.key not in bindings:
                     continue
                 if action == "up":
-                    self.selected = (self.selected - 1) % len(self.items)
+                    if self.total_items > 0:
+                        self.selected = (self.selected - 1) % self.total_items
+                    return True
                 elif action == "down":
-                    self.selected = (self.selected + 1) % len(self.items)
+                    if self.total_items > 0:
+                        self.selected = (self.selected + 1) % self.total_items
+                    return True
+                elif action == "left" and self.sliders and self._is_slider_selected():
+                    self._adjust_slider(self._slider_index(), -1)
+                    return True
+                elif action == "right" and self.sliders and self._is_slider_selected():
+                    self._adjust_slider(self._slider_index(), 1)
+                    return True
                 elif action == "confirm":
-                    self.activate()
+                    if self._is_slider_selected():
+                        # Confirming on a slider just confirms its current value
+                        pass
+                    else:
+                        self.activate()
+                    return True
                 elif action == "deny":
                     self.app.close_menu()
+                    return True
                 else:
                     continue
                 return True
@@ -326,6 +552,13 @@ class MenuController:
                 if rect.collidepoint(event.pos):
                     self.selected = index
                     return True
+            if self.active_slider is not None:
+                self._set_slider_from_mouse(self.active_slider, event.pos)
+                return True
+            for index, rect in enumerate(self.slider_rects):
+                if rect.collidepoint(event.pos):
+                    self.selected = len(self.items) + index
+                    return True
 
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             for index, rect in enumerate(self.button_rects):
@@ -333,8 +566,87 @@ class MenuController:
                     self.selected = index
                     self.activate()
                     return True
+            if self.slider_rects:
+                for index, rect in enumerate(self.slider_rects):
+                    if rect.collidepoint(event.pos):
+                        self.selected = len(self.items) + index
+                        self.active_slider = index
+                        self._set_slider_from_mouse(index, event.pos)
+                        return True
+
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.active_slider = None
 
         return False
+
+    def _slider_value_to_position(self, index: int) -> float:
+        """Convert a slider's current value to a 0-1 position along the track."""
+        slider = self.sliders[index]
+        value = self.slider_values[index]
+        if slider.max_value <= slider.min_value:
+            return 0.0
+        return (value - slider.min_value) / (slider.max_value - slider.min_value)
+
+    def _slider_position_to_value(self, index: int, position: float) -> float:
+        """Convert a 0-1 track position to a slider value, snapped to step."""
+        slider = self.sliders[index]
+        position = max(0.0, min(1.0, position))
+        raw_value = slider.min_value + position * (slider.max_value - slider.min_value)
+        if slider.step > 0:
+            raw_value = round(raw_value / slider.step) * slider.step
+        return max(slider.min_value, min(slider.max_value, raw_value))
+
+    def _adjust_slider(self, index: int, direction: int) -> None:
+        """Adjust a slider value by one step in the given direction (-1 or 1)."""
+        slider = self.sliders[index]
+        new_value = self._slider_position_to_value(
+            index,
+            self._slider_value_to_position(index) + direction * slider.step,
+        )
+        self.slider_values[index] = new_value
+        if slider.action is not None:
+            slider.action(self.app, new_value)
+
+    def _set_slider_from_mouse(self, index: int, mouse_pos: tuple[int, int]) -> None:
+        """Set a slider's value based on a mouse position within its track."""
+        slider = self.sliders[index]
+        rect = self.slider_rects[index]
+        track_x = rect.x + 8
+        track_width = rect.width - 16
+        if track_width <= 0:
+            return
+        position = (mouse_pos[0] - track_x) / track_width
+        self.slider_values[index] = self._slider_position_to_value(index, position)
+        if slider.action is not None:
+            slider.action(self.app, self.slider_values[index])
+
+    def _is_slider_selected(self) -> bool:
+        """Return True if the current selection is on a slider."""
+        return self.total_items > 0 and self.selected >= len(self.items)
+
+    def _slider_index(self) -> int:
+        """Return the index of the currently selected slider, or -1."""
+        if self._is_slider_selected():
+            return self.selected - len(self.items)
+        return -1
+
+    def _render_text(self, text: str, color: tuple[int, ...], size: int = 24) -> pygame.Surface:
+        """Render text using the bitmap font if available, else pygame font."""
+        if self.bitmap_font is not None:
+            try:
+                # Add character spacing so bitmap text isn't cramped
+                surface = self.bitmap_font.print(text, spacing=2)
+                # Scale up tiny bitmap glyphs (8px tall) to a readable size
+                target_height = max(size, 24)
+                if surface.get_height() < target_height:
+                    scale = target_height / surface.get_height()
+                    new_width = max(1, int(surface.get_width() * scale))
+                    surface = pygame.transform.scale(surface, (new_width, target_height))
+                return surface
+            except KeyError:
+                pass
+        font = self.title_font if size > 24 else self.font
+        return font.render(text, True, color)
 
     def activate(self):
         item = self.items[self.selected]
@@ -355,7 +667,7 @@ class MenuController:
         panel_rect = self.panel_surface.get_rect(center=screen.get_rect().center)
         screen.blit(self.panel_surface, panel_rect)
 
-        title = self.title_font.render(self.title, True, (242, 246, 249))
+        title = self._render_text(self.title, (242, 246, 249), size=32)
         screen.blit(title, title.get_rect(midtop=(panel_rect.centerx, panel_rect.top + 13)))
 
         self.button_rects = []
@@ -366,7 +678,66 @@ class MenuController:
                 break
             rect = button.get_rect(midtop=(panel_rect.centerx, button_y))
             screen.blit(button, rect)
-            label = self.font.render(button_definition.label, True, (245, 248, 250))
+            label = self._render_text(button_definition.label, (245, 248, 250))
             screen.blit(label, label.get_rect(center=rect.center))
             self.button_rects.append(rect)
             button_y += button.get_height() + 8
+
+        # Render sliders
+        self.slider_rects = []
+        slider_y = button_y + 12
+
+        for index, slider in enumerate(self.sliders):
+            if slider_y + 30 > panel_rect.bottom - 16:
+                break
+
+            is_selected = self._is_slider_selected() and self._slider_index() == index
+            is_active = self.active_slider == index
+
+            if is_selected or is_active:
+                colors = self.definition.selected_slider_colors
+                label_color = (255, 255, 255)
+            else:
+                colors = self.definition.slider_colors
+                label_color = (245, 248, 250)
+
+            # colors: (track_bg, track_fill, handle_idle, handle_active)
+
+            # Slider label + value text
+            value_text = f"{slider.label}: {self.slider_values[index]:g}"
+            label_surface = self._render_text(value_text, label_color)
+            label_rect = label_surface.get_rect(midtop=(panel_rect.centerx, slider_y))
+            screen.blit(label_surface, label_rect)
+
+            # Slider track and handle
+            track_x = panel_rect.centerx - 100
+            track_y = slider_y + 16
+            track_width = 200
+            track_height = 8
+            handle_size = 16
+
+            track_rect = pygame.Rect(track_x, track_y, track_width, track_height)
+            self.slider_rects.append(track_rect)
+
+            # Track background
+            pygame.draw.rect(screen, colors[0], track_rect, border_radius=track_height // 2)
+
+            # Fill portion
+            position = self._slider_value_to_position(index)
+            fill_width = int(track_width * position)
+            if fill_width > 0:
+                fill_rect = pygame.Rect(track_x, track_y, fill_width, track_height)
+                pygame.draw.rect(screen, colors[1], fill_rect, border_radius=track_height // 2)
+
+            # Handle
+            handle_x = track_x + fill_width - handle_size // 2
+            handle_y = track_y - (handle_size - track_height) // 2
+            handle_rect = pygame.Rect(handle_x, handle_y, handle_size, handle_size)
+            handle_color = colors[3] if (is_selected or is_active) else colors[2]
+            pygame.draw.rect(screen, handle_color, handle_rect, border_radius=4)
+
+            # White outline around handle when selected or active
+            if is_selected or is_active:
+                pygame.draw.rect(screen, (245, 248, 250), handle_rect, 2)
+
+            slider_y += 36

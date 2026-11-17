@@ -4,6 +4,7 @@ ASSET_PATHS = {
     "icon": "assets/icon.py",
     "keybinds": "assets/keybinds.py",
     "font": "assets/fonts/font.py",
+    "glyph": "assets/fonts/glyph.py",
     "menus": "assets/menus.py",
     "sprites": "assets/sprites.py",
     "tilemap": "assets/tilemaps/home.py",

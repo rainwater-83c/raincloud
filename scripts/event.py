@@ -1,5 +1,7 @@
 '''User-friendly events that are called by sprites or other things in the code.'''
 from . import sprite
+from .userinterface import DialogueBox
+from .userinterface import DialogueBox
 #from scripts.eventvars import ds
 
 
@@ -33,6 +35,57 @@ def move(entity: sprite.Sprite, direction: int | str, amount: int, speed: float 
 def wait(frames):
     for _ in range(frames):
         yield
+
+
+def dialogue(entity, location, text, font="font", colors=None):
+    """Display dialogue until confirm is pressed."""
+    app = getattr(entity, "app", None)
+    if app is None:
+        app = getattr(getattr(entity, "tilemap", None), "app", None)
+    if app is None:
+        raise ValueError("Dialogue entity is not attached to an App")
+
+    app.dialogue_box = DialogueBox(app, entity, location, text, font, colors)
+    ignore_current_confirm = "confirm" in app.just_pressed
+    try:
+        while True:
+            yield
+            if "confirm" not in app.just_pressed:
+                ignore_current_confirm = False
+            elif ignore_current_confirm:
+                ignore_current_confirm = False
+            else:
+                app.just_pressed.remove("confirm")
+                return
+    finally:
+        app.dialogue_box = None
+
+
+def dialogue(
+    entity,
+    location: str,
+    text: str,
+    font="font",
+    colors=None,
+):
+    """Show a dialogue box until the player confirms it."""
+    app = getattr(entity, "app", None)
+    if app is None:
+        app = getattr(getattr(entity, "tilemap", None), "app", None)
+    if app is None:
+        raise ValueError("Dialogue entity is not attached to an App")
+
+    app.dialogue_box = DialogueBox(app, entity, location, text, font, colors)
+    try:
+        while "confirm" in app.just_pressed:
+            yield
+        while True:
+            yield
+            if "confirm" in app.just_pressed:
+                app.just_pressed.remove("confirm")
+                break
+    finally:
+        app.dialogue_box = None
 
 # Sets PS5 LED color
 def set_PS5_led(color):

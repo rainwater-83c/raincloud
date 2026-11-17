@@ -9,6 +9,19 @@ import pygame
 
 texture = Path(__file__).with_name("glyphs.png").read_bytes()
 box_size = 8
+GLYPH_COMPONENTS = (
+	"", "A", "AI", "B", "D", "DH", "DY", "E", "F", "G",
+	"H", "I", "K", "L", "M", "N", "O", "P", "R", "S",
+	"SY", "T", "TH", "TY", "U", "V", "W", "Y", "Z", "ZY",
+)
+GLYPH_COMPONENT_TO_INDEX = {
+	component: index for index, component in enumerate(GLYPH_COMPONENTS)
+}
+GLYPH_PAIR_TO_INDEX = {
+	(left, right): left_index * len(GLYPH_COMPONENTS) + right_index
+	for left_index, left in enumerate(GLYPH_COMPONENTS)
+	for right_index, right in enumerate(GLYPH_COMPONENTS)
+}
 SOURCE_COLORS = (
 	(0, 0, 0, 255),
 	(255, 255, 255, 255),
@@ -69,3 +82,12 @@ def get_glyph(index: int) -> pygame.Surface:
 	if bounds.width == 0 or bounds.height == 0:
 		return pygame.Surface((1, 1), pygame.SRCALPHA, 32)
 	return glyph.subsurface(bounds).copy()
+
+
+def get_glyph_pair(left: str, right: str) -> pygame.Surface:
+	"""Return the glyph formed by the indexed left and right components."""
+	try:
+		index = GLYPH_PAIR_TO_INDEX[(left.strip().upper(), right.strip().upper())]
+	except KeyError as error:
+		raise KeyError(f"Unknown glyph pair: <{left}|{right}>") from error
+	return get_glyph(index)

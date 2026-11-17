@@ -8,7 +8,7 @@ import pygame
 texture = Path(__file__).with_name("font.png").read_bytes()
 box_size = 8
 SOURCE_WHITE = (255, 255, 255, 255)
-SOURCE_BLACK = (0, 0, 0, 0)
+SOURCE_BLACK = (0, 0, 0, 255)
 _source = None
 _atlas = None
 
@@ -48,8 +48,10 @@ def _get_atlas() -> pygame.Surface:
 	return _atlas
 
 
-def set_palette(white, black=(0, 0, 0, 0)) -> None:
+def set_palette(white, black=None) -> None:
 	"""Replace the sheet's white and black pixels, in that order."""
+	if not black:
+		black = white
 	global _atlas
 	white = _rgba(white)
 	black = _rgba(black)

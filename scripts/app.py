@@ -84,7 +84,19 @@ class App:
         self.gamepad_keybinds = {}
         self.pressed_keys = []  # blank list for held keys
         self.tilemap = tilemap
+        self.tilemap.app = self
         self.core_assets = core_assets
+        self.dialogue_box = None
+        self.dialogue_fonts = {}
+        if self.bitmap_font is not None:
+            self.dialogue_fonts["font"] = self.bitmap_font
+        for font_name, font_asset in self.core_assets.items():
+            if font_name == "font":
+                continue
+            if callable(getattr(font_asset, "get_glyph", None)) or callable(
+                getattr(font_asset, "print", None)
+            ):
+                self.dialogue_fonts[font_name] = font_asset
         self.menu_definitions = {}
         sprite_module = self.core_assets.get("sprites")
         sprite_definitions = getattr(sprite_module, "sprites", None)
@@ -99,8 +111,13 @@ class App:
         self.camera = Camera(self.tilemap.width, self.tilemap.height)
         self.party = sprite.Party()
         self.player = sprite_definitions['player'](self.tilemap)
+        self.player.app = self
         self.party.leader = self.player
         self.sprites = [self.player]
+        for row in self.tilemap.tile_sprites:
+            for tile_sprite in row:
+                if tile_sprite is not None:
+                    tile_sprite.app = self
         self.clock = pygame.time.Clock()
         self.joystick = (
             pygame.joystick.Joystick(0)
@@ -112,6 +129,9 @@ class App:
         self.menu = None
         self.fps = 0
         self.save = save.Save()
+        self.master_volume = 1.0
+        self.music_volume = 1.0
+        self.sfx_volume = 1.0
         self.frame_times = []
         self.max_tracked_frames = self.settings.FPS_HISTORY
         self.bgm = sound.BGM()
@@ -127,6 +147,12 @@ class App:
         self.day_length = self.tilemap.module.day_length
         self.day_phase = 0
         self.phase_colors = self.tilemap.module.phase_colors
+
+        # Play background music if the tilemap defines one
+        bgm_name = getattr(self.tilemap.module, "bgm", None)
+        if bgm_name:
+            self.bgm.play(bgm_name)
+            self.bgm.set_volume(self.master_volume * self.music_volume)
 
     def add_light_source(self, x, y, color=(255, 180, 100), radius=48, intensity=0.2, height=None, casts_shadows=True):
         return self.lighting.add_light_source(
@@ -252,9 +278,12 @@ class App:
         self.screen.blit(self.ambient_overlay, (0,0))
         if self.gpu_display:
             menu_overlay = None
-            if self.menu is not None:
+            if self.menu is not None or self.dialogue_box is not None:
                 menu_overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
-                self.menu.render(menu_overlay)
+                if self.menu is not None:
+                    self.menu.render(menu_overlay)
+                if self.dialogue_box is not None:
+                    self.dialogue_box.render(menu_overlay)
             self.lighting.render_lights(
                 self.screen,
                 self.camera,
@@ -265,6 +294,8 @@ class App:
             self.lighting.render_lights(self.screen, self.camera, render_list)
             if self.menu is not None:
                 self.menu.render(self.screen)
+            if self.dialogue_box is not None:
+                self.dialogue_box.render(self.screen)
         pygame.display.flip()
 
     def tick(self):

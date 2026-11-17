@@ -5,7 +5,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from raincloud.scripts.app import App
+from .app import App
 
 class Modloader:
     def __init__(self, app: App, plugin_dir=None):

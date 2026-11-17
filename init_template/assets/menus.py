@@ -9,6 +9,10 @@ def quit_game(app):
 	app.running = False
 
 
+def open_settings(app):
+	app.open_menu("settings")
+
+
 def filled_matrix(width, height) -> Matrix:
 	return tuple(tuple(1 for _ in range(width)) for _ in range(height))
 
@@ -16,7 +20,7 @@ def filled_matrix(width, height) -> Matrix:
 MENUS = {
 	"pause": Menu(
 		title="Paused",
-		matrix=filled_matrix(13, 12),
+		matrix=filled_matrix(13, 16),
 		corner_type="rounded",
 		edge_style="straight",
 		colors=(
@@ -31,7 +35,9 @@ MENUS = {
 		),
 		buttons=(
 			Button(label="Resume", action=resume),
+			Button(label="Settings", action=open_settings),
 			Button(label="Quit", action=quit_game),
 		),
 	),
+	"settings": None,  # Filled in by settings module at runtime
 }

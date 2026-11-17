@@ -58,3 +58,4 @@ content = [
 	],
 ]
 tileset = "home"
+bgm = "home"
