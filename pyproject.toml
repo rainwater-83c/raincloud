@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raincloud-engine"
+version = "0.1.1"
+description = "A Python game engine and development CLI"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+requires-python = ">=3.10"
+dependencies = ["pygame-ce>=2.5.8"]
+
+[project.optional-dependencies]
+build = ["Nuitka>=4.3"]
+gpu = ["moderngl>=5.10"]
+
+[project.scripts]
+raincloud = "cli:main"
+
+[tool.setuptools]
+package-dir = { raincloud = "." }
+packages = ["raincloud", "cli_tools", "scripts"]
+
+[tool.setuptools.package-data]
+raincloud = [
+    "init_template/*.py",
+    "init_template/assets/*.py",
+    "init_template/assets/*/*",
+]

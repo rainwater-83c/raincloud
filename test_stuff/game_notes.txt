@@ -1,0 +1,121 @@
+Worlds:
+    [Name]:
+        [Color]
+        [Environment]
+        [Ability]
+
+    Home (Name TBD):
+        None
+        Peaceful
+        None
+
+        Home world, looks a lot like Earth. Where main character lives.
+    Pyron:
+        Red
+        Volcanic
+        Corruption
+
+        Signs of corruption, blocking off areas. Lava and fire everywhere.
+    Enevi:
+        Yellow
+        Technological
+        Energy
+
+        Machines everywhere, most are broken.
+    Livina:
+        Green
+        Overgrown
+        Life
+
+        Lots and lots of vines and plants. 
+    Glacis:
+        Cyan
+        Frozen
+        Space
+
+        Frozen, and glittery, looks like stars are beneath the ice. VERY hard to navigate; Rooms don't connect in a euclidean way.
+    Aquvo:
+        Blue
+        Underwater
+        Soul
+
+        No clue what to with the soul mechanic/ability.
+    Tempra:
+        Magenta
+        Ruined
+        Time
+
+        Broken structures everywhere.
+    Nadir:
+        Black
+        Dark
+        Void
+
+        Impossible to navigate without some form of light. Enemies in the dark.
+    Linar:
+        White
+        Bright
+        Purity
+
+        No idea what to do with this one either.
+
+Characters:
+    [Name]:
+        [Color]
+        [Ability]
+        [Personality]
+        [Visual discription]
+    
+    Silverfall:
+        All
+        All (Learns them as game progresses)
+        TBD
+        Gray feline, eyes depend on selected abilities, anthro, female
+    
+    Flamelight:
+        Red
+        Corruption
+        Cold
+        Ginger feline, red eyes, anthro, male
+
+        Stranded, needs space manipulation
+
+    Spirecloud:
+        Yellow
+        Energy
+        Friendly
+        White feline with slight yellow undertones, yellow eyes, anthro, male
+
+        Trapped in a machine, needs soul manipulation
+
+    Fernwood:
+        Green
+        Life
+        Reserved
+        White feline with slight green undertones, green eyes, feral or anthro, female
+
+        Stuck as kitten, needs time manipulation
+
+    Frostfeather:
+        Cyan
+        Space
+        Friendly, Playful
+        White feline with slight cyan undertones, cyan eyes, anthro, androgynous
+
+        Trapped in ice, needs corruption manipulation, still TBD
+
+    Echosight:
+        Blue
+        Soul
+        Shy
+        Gray feline, blue eyes, anthro, female
+
+        Water is electrified, needs energy manipulation
+
+    Nightpool:
+        Magenta
+        Time
+        Playful
+        Gray feline, magenta eyes, anthro, female
+
+        Long since dead (lived in the past), needs life manipulation
