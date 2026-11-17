@@ -32,9 +32,9 @@ python -m pip install "raincloud-engine[gpu]"
 
 Set `GPU_LIGHTING = True` in the game's `config.py` to enable the ModernGL
 compositor and direct OpenGL presentation, which avoids reading the lit frame
-back to the CPU. Scene drawing and sun-shadow projection still use the Pygame
-canvas. If OpenGL initialization fails, the engine falls back to software
-display and lighting.
+back to the CPU. Static sun shadows are projected on the GPU each simulation
+tick; scene drawing and dynamic sprite shadows still use Pygame. If OpenGL
+initialization fails, the engine falls back to software display and lighting.
 
 ## Build a distribution
 
