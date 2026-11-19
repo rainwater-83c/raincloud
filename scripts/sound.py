@@ -27,11 +27,28 @@ class BGM:
 class SFX:
     def __init__(self):
         pygame.mixer.init()
+        self._modules = {}
+        self._sounds = {}
+
+    def _sound(self, key, audio_data):
+        sound = self._sounds.get(key)
+        if sound is None:
+            sound = reusable.bytes_to_audio(audio_data)
+            self._sounds[key] = sound
+        return sound
        
     def play(self, name, volume = (1.0, 1.0)):
-        module = reusable.path_to_module(Path(f"assets/audio/sfx/{name}.py"))
-        sound = reusable.bytes_to_audio(module.audio).play()
-        sound.set_volume(*volume)
+        module = self._modules.get(name)
+        if module is None:
+            module = reusable.path_to_module(Path(f"assets/audio/sfx/{name}.py"))
+            self._modules[name] = module
+        channel = self._sound(("name", name), module.audio).play()
+        if channel is not None:
+            channel.set_volume(*volume)
+        return channel
 
-    def play_bytes(self, bytes):
-        reusable.bytes_to_audio(bytes).play()
+    def play_bytes(self, audio_data, volume=(1.0, 1.0)):
+        channel = self._sound(("bytes", audio_data), audio_data).play()
+        if channel is not None:
+            channel.set_volume(*volume)
+        return channel

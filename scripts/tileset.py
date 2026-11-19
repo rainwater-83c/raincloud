@@ -4,6 +4,7 @@ Tileset extension is .rct
 '''
 
 import pygame
+import numpy as np
 from pathlib import Path
 import importlib.util
 from . import reusable
@@ -43,6 +44,8 @@ class Tileset:
             self._tile_cache[tile] = Tile(self, tile)
         return self._tile_cache[tile]
 
+
+
 class Tile:
     def __init__(self, tileset, tile):
         self.tileset = tileset
@@ -57,6 +60,7 @@ class Tile:
         self.filter = self.tileset.filter.subsurface(self.rect)
         self.shadow_pixels = []
         self.emission_pixels = []
+        self.height = int(np.max(pygame.surfarray.array_red(self.geometry)))
         for y in range(self.size):
             for x in range(self.size):
                 red, green, blue, alpha = self.geometry.get_at((x, y))
@@ -66,3 +70,29 @@ class Tile:
                 red, green, blue, alpha = self.emission.get_at((x, y))
                 if alpha and (red or green or blue):
                     self.emission_pixels.append((x, y, red, green, blue, alpha / 255))
+
+    def split(self, geometry=None):
+        textures = {}
+        if geometry is None:
+            geometry = self.geometry
+
+        rgb = pygame.surfarray.array3d(self.surface)
+        alpha = pygame.surfarray.array_alpha(self.surface)
+        height = pygame.surfarray.array_red(geometry)
+
+        for value in np.unique(height):
+            mask = height == value
+
+            surface = pygame.Surface(self.surface.get_size(), pygame.SRCALPHA, 32)
+
+            rgb_view = pygame.surfarray.pixels3d(surface)
+            alpha_view = pygame.surfarray.pixels_alpha(surface)
+
+            rgb_view[:] = rgb
+            alpha_view[:] = np.where(mask, alpha, 0)
+
+            del rgb_view, alpha_view  # release the surface pixel views
+            textures[int(value)] = surface
+
+        return textures
+

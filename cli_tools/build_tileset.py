@@ -16,7 +16,7 @@ print(f"tileset converter version {__version__}")
 path = pathlib.Path(args.path)
 
 with open(path, "rb") as f:
-    content = f.read()
+    texture_data = f.read()
 
 img = pygame.image.load(path)
 width, height = img.get_size()
@@ -35,6 +35,6 @@ with open(f"{path.stem}.py", "w") as f:
 format = {FORMAT}
 name = "{path.stem}"
 tile_size = {args.tile_size}
-content = {content}
+texture = {texture_data}
 priority = {(0,)*len(tiles)}
 """)

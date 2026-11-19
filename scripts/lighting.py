@@ -1,12 +1,20 @@
 import math
 import warnings
 
+import numpy as np
 import pygame
 
 
 class LightingSystem:
     def __init__(self, tilemap, use_gpu=False, gpu_compositor=None):
         self.tilemap = tilemap
+        source_groups = getattr(tilemap, "shadow_source_groups", None)
+        if source_groups:
+            self._shadow_source_groups = source_groups
+        elif tilemap.shadow_sources:
+            self._shadow_source_groups = (tilemap.shadow_sources,)
+        else:
+            self._shadow_source_groups = ()
         self.use_gpu = use_gpu
         self._gpu_compositor = gpu_compositor
         self._gpu_failed = False
@@ -17,6 +25,12 @@ class LightingSystem:
         self._light_shadow_cache = {}
         self._shadow_phase = None
         self._shadow_surface = None
+        self._receiver_height_geometry = None
+        self._receiver_heights = None
+        self._shadow_layer_surfaces = {}
+        self._shadow_layer_rects = {}
+        self._occlusion_geometry_source = None
+        self._occlusion_geometry = None
 
     def add_light_source(
         self,
@@ -45,26 +59,44 @@ class LightingSystem:
 
     def render_shadows(self, screen, camera, day_phase, render_list):
         sun = self._sun_vector(day_phase)
-        if math.hypot(sun[0], sun[1]) < 1e-6:
-            return
+        if sun[2] <= 0.05:
+            return {}
+
+        dynamic_shadow_sources = []
+        dynamic_shadow_geometry = []
+        for _, entity in render_list:
+            geometry = self._sprite_shadow_pixels(entity)
+            if not geometry:
+                continue
+            dynamic_shadow_geometry.append((entity, geometry))
+            entity_sources = [
+                (
+                    entity.rect.left + pixel_x,
+                    entity.rect.top + pixel_y,
+                    height,
+                    y_offset,
+                    depth,
+                    opacity,
+                )
+                for pixel_x, pixel_y, height, y_offset, depth, opacity in geometry
+            ]
+            if entity_sources:
+                dynamic_shadow_sources.append(entity_sources)
 
         shadow_surface = None
-        if self.tilemap.shadow_sources and sun[2] > 0.05:
+        gpu_shadows_rendered = False
+        if self.tilemap.shadow_sources or dynamic_shadow_sources:
             compositor = self._get_gpu_compositor()
             if compositor is not None and not self._gpu_failed:
                 try:
-                    source_groups = getattr(
-                        self.tilemap,
-                        "shadow_source_groups",
-                        None,
-                    )
-                    if not source_groups:
-                        source_groups = (self.tilemap.shadow_sources,)
                     shadow_surface = compositor.render_sun_shadows(
                         self.tilemap.geometry_tiles,
-                        source_groups,
+                        self._shadow_source_groups,
                         sun,
+                        dynamic_shadow_sources,
+                        self._get_displaced_geometry(self.tilemap.geometry_tiles),
                     )
+                    gpu_shadows_rendered = shadow_surface is not None
                 except Exception as error:
                     self._gpu_failed = True
                     warnings.warn(
@@ -72,44 +104,94 @@ class LightingSystem:
                         RuntimeWarning,
                         stacklevel=2,
                     )
-            if shadow_surface is None:
+            if shadow_surface is None and self.tilemap.shadow_sources:
                 shadow_surface = self._sun_shadow_surface(day_phase)
-            if shadow_surface is not None:
-                screen.blit(
-                    shadow_surface,
-                    (-camera.offset_x, -camera.offset_y),
+
+        if not gpu_shadows_rendered and dynamic_shadow_geometry:
+            if shadow_surface is None:
+                shadow_surface = pygame.Surface(
+                    (self.tilemap.width, self.tilemap.height),
+                    pygame.SRCALPHA,
                 )
-
-        if not render_list:
-            return
-
-        if sun[2] <= 0.05:
-            return
-
-        dynamic_shadows = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-        has_dynamic_shadows = False
-
-        for _, entity in render_list:
-            geometry = self._sprite_shadow_pixels(entity)
-            if not geometry:
-                continue
-            has_dynamic_shadows = True
-            self._project_sources(
-                dynamic_shadows,
-                geometry,
-                entity.rect.left,
-                entity.rect.top,
-                sun,
-                self.tilemap.geometry_tiles,
-                camera.offset_x,
-                camera.offset_y,
-                self.tilemap.tileset.tile_size,
+            dynamic_shadows = pygame.Surface(
+                (self.tilemap.width, self.tilemap.height),
+                pygame.SRCALPHA,
             )
+            for entity, geometry in dynamic_shadow_geometry:
+                self._project_sources(
+                    dynamic_shadows,
+                    geometry,
+                    entity.rect.left,
+                    entity.rect.top,
+                    sun,
+                    self.tilemap.geometry_tiles,
+                    0,
+                    0,
+                    self.tilemap.tileset.tile_size,
+                    world_surface=True,
+                )
+            shadow_surface.blit(dynamic_shadows, (0, 0))
 
-        if has_dynamic_shadows:
-            screen.blit(dynamic_shadows, (0, 0))
+        if shadow_surface is None:
+            return {}
+        return self._split_shadow_surface(shadow_surface)
 
-    def render_lights(self, screen, camera, render_list, overlay=None):
+    def _split_shadow_surface(self, shadow_surface):
+        shadow_rect = shadow_surface.get_bounding_rect()
+        if not shadow_rect.width or not shadow_rect.height:
+            return {}
+
+        shadow_alpha = pygame.surfarray.array_alpha(
+            shadow_surface.subsurface(shadow_rect)
+        )
+        shadow_pixels = shadow_alpha > 0
+        if not np.any(shadow_pixels):
+            return {}
+
+        geometry = self._get_displaced_geometry(self.tilemap.geometry_tiles)
+        if self._receiver_height_geometry is not geometry:
+            self._receiver_heights = pygame.surfarray.array_red(geometry)
+            self._receiver_height_geometry = geometry
+            self._shadow_layer_surfaces.clear()
+            self._shadow_layer_rects.clear()
+
+        receiver_heights = self._receiver_heights[
+            shadow_rect.left:shadow_rect.right,
+            shadow_rect.top:shadow_rect.bottom,
+        ]
+        layers = {}
+        for height in np.unique(receiver_heights[shadow_pixels]):
+            surface = self._shadow_layer_surfaces.get(int(height))
+            if surface is None:
+                surface = pygame.Surface(shadow_surface.get_size(), pygame.SRCALPHA)
+                self._shadow_layer_surfaces[int(height)] = surface
+            previous_rect = self._shadow_layer_rects.get(int(height))
+            if previous_rect is not None:
+                previous_alpha = pygame.surfarray.pixels_alpha(
+                    surface.subsurface(previous_rect)
+                )
+                previous_alpha.fill(0)
+                del previous_alpha
+            alpha_view = pygame.surfarray.pixels_alpha(
+                surface.subsurface(shadow_rect)
+            )
+            alpha_view.fill(0)
+            receiver_mask = receiver_heights == height
+            alpha_view[receiver_mask] = shadow_alpha[receiver_mask]
+            del alpha_view
+            layers[int(height)] = surface
+            self._shadow_layer_rects[int(height)] = shadow_rect
+        return layers
+
+    def render_lights(
+        self,
+        screen,
+        camera,
+        render_list,
+        overlay=None,
+        scene_ready=False,
+        ambient_color=None,
+    ):
         sources = list(self.tilemap.emission_sources) + self.light_sources
         for _, entity in render_list:
             for pixel_x, pixel_y, red, green, blue, strength in self._sprite_emission_pixels(entity):
@@ -141,7 +223,15 @@ class LightingSystem:
 
         if compositor is not None and not self._gpu_failed:
             try:
-                compositor.render(screen, filter_map, sources, camera, overlay)
+                compositor.render(
+                    screen,
+                    filter_map,
+                    sources,
+                    camera,
+                    overlay,
+                    scene_ready=scene_ready,
+                    ambient_color=ambient_color,
+                )
                 return
             except Exception as error:
                 self._gpu_failed = True
@@ -188,19 +278,17 @@ class LightingSystem:
             self._gpu_compositor = None
 
     def prepare_sun_shadows(self):
-        if not self.tilemap.shadow_sources:
+        if not self._shadow_source_groups:
             return
         compositor = self._get_gpu_compositor()
         if compositor is None or self._gpu_failed:
             return
 
-        source_groups = getattr(self.tilemap, "shadow_source_groups", None)
-        if not source_groups:
-            source_groups = (self.tilemap.shadow_sources,)
         try:
             compositor.prepare_sun_shadows(
                 self.tilemap.geometry_tiles,
-                source_groups,
+                self._shadow_source_groups,
+                self._get_displaced_geometry(self.tilemap.geometry_tiles),
             )
         except Exception as error:
             self._gpu_failed = True
@@ -214,9 +302,38 @@ class LightingSystem:
         angle = math.tau * (day_phase % 1.0) - math.pi / 2
         return (
             math.cos(angle),
-            0.18 * math.cos(angle),
+            0,
             math.sin(angle),
         )
+
+    def _get_displaced_geometry(self, geometry):
+        if self._occlusion_geometry_source is geometry:
+            return self._occlusion_geometry
+
+        width, height = geometry.get_size()
+        rgb = pygame.surfarray.array3d(geometry)
+        alpha = pygame.surfarray.array_alpha(geometry)
+        source_x, source_y = np.nonzero(alpha)
+        displacement = 128 - rgb[source_x, source_y, 1]
+        target_y = source_y + displacement
+        valid = (target_y >= 0) & (target_y < height)
+        heights = np.full((width, height), -1, dtype=np.int16)
+        np.maximum.at(
+            heights,
+            (source_x[valid], target_y[valid]),
+            rgb[source_x[valid], source_y[valid], 0],
+        )
+
+        displaced_geometry = pygame.Surface((width, height), pygame.SRCALPHA)
+        rgb_view = pygame.surfarray.pixels3d(displaced_geometry)
+        alpha_view = pygame.surfarray.pixels_alpha(displaced_geometry)
+        rgb_view[:, :, 0] = np.maximum(heights, 0)
+        alpha_view[:, :] = np.where(heights >= 0, 255, 0)
+        del rgb_view, alpha_view
+
+        self._occlusion_geometry_source = geometry
+        self._occlusion_geometry = displaced_geometry
+        return displaced_geometry
 
     def _sun_shadow_surface(self, day_phase):
         if not self.tilemap.shadow_sources:
@@ -232,9 +349,7 @@ class LightingSystem:
             self._shadow_surface = None
             return None
 
-        source_groups = getattr(self.tilemap, "shadow_source_groups", None)
-        if not source_groups:
-            source_groups = (self.tilemap.shadow_sources,)
+        source_groups = self._shadow_source_groups
         shadow_surface = pygame.Surface(
             (self.tilemap.width, self.tilemap.height),
             pygame.SRCALPHA,
@@ -278,6 +393,7 @@ class LightingSystem:
         target_width, target_height = target.get_size()
         world_width = world_geometry.get_width()
         world_height = world_geometry.get_height()
+        occlusion_geometry = self._get_displaced_geometry(world_geometry)
         if projected_points is None:
             projected_points = {}
         new_projected_points = set()
@@ -331,7 +447,7 @@ class LightingSystem:
                         continue
                     if not (0 <= ray_x < world_width and 0 <= ray_y < world_height):
                         continue
-                    occluder = world_geometry.get_at((ray_x, ray_y))
+                    occluder = occlusion_geometry.get_at((ray_x, ray_y))
                     ray_height = height * (1 - fraction)
                     if occluder.a and occluder.r - 128 > ray_height:
                         blocked = True
@@ -339,14 +455,7 @@ class LightingSystem:
                 if blocked:
                     continue
 
-                no_pixel_shift = (
-                    shadow_x == round(caster_x)
-                    and shadow_y == round(caster_y)
-                )
-                if no_pixel_shift and (shadow_x - origin_x, shadow_y - origin_y) in caster_pixels:
-                    continue
-
-                receiver = world_geometry.get_at((shadow_x, shadow_y))
+                receiver = occlusion_geometry.get_at((shadow_x, shadow_y))
                 if receiver.a == 0 or receiver.r - 128 > height:
                     continue
 

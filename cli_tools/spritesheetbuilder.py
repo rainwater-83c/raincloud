@@ -15,12 +15,12 @@ print(f"spritesheetbuilder version {__version__}")
 path = pathlib.Path(args.path)
 
 with open(path, "rb") as f:
-    content = f.read()
+    texture_data = f.read()
 
 with open(f"{path.stem}.py", "w") as f:
     f.write(f"""
 format = {FORMAT}
 name = "{path.stem}"
-content = {content}
+texture = {texture_data}
 """)
     

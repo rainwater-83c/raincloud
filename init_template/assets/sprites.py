@@ -4,7 +4,7 @@ from raincloud.scripts.eventvars import *
 
 sprites = {}
 
-sprites['player'] = lambda tilemap: Sprite(Spritesheet('niko', 4), 'Player', 5, 5, tilemap)
+sprites['player'] = lambda tilemap: Sprite(Spritesheet('player', 4), 'Player', 5, 5, tilemap)
 sprites['safe'] = TileSprite(Spritesheet('blue_safe', 4), 'safe')
 
 def safe_on_interaction(self, target):

@@ -42,9 +42,9 @@ class App:
         font_asset = core_assets.get("font")
         self.bitmap_font = Font(font_asset) if font_asset is not None else None
         icon_module = core_assets.get("icon")
-        icon_content = getattr(icon_module, "content", None)
-        if icon_content is not None:
-            icon_image = pygame.image.load(__import__("io").BytesIO(icon_content))
+        icon_texture = getattr(icon_module, "texture", None)
+        if icon_texture is not None:
+            icon_image = pygame.image.load(__import__("io").BytesIO(icon_texture))
             pygame.display.set_icon(icon_image)
         pygame.display.set_caption(self.settings.WINDOW_TITLE)
         flags = RESIZABLE if self.settings.WINDOW_RESIZABLE else 0
@@ -52,6 +52,14 @@ class App:
         self.gpu_display = False
         if getattr(self.settings, "GPU_LIGHTING", False):
             try:
+                pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+                pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
+                pygame.display.gl_set_attribute(
+                    pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE
+                )
+                pygame.display.gl_set_attribute(
+                    pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, True
+                )
                 pygame.display.set_mode(
                     self.settings.WINDOW_SIZE,
                     flags | OPENGL | DOUBLEBUF,
@@ -197,7 +205,10 @@ class App:
 
         # IMPORTANT:
         # rect MUST follow world position
-        self.player.rect.midbottom = (self.player.x, self.player.y)
+        self.player.rect.midbottom = (
+            self.player.x,
+            self.player.y + round(self.player.displacement),
+        )
 
         self.camera.update(
             self.player,
@@ -221,44 +232,57 @@ class App:
         self.screen.fill((0, 0, 0))
 
         # Ground layer
-        self.screen.blit(
-            self.tilemap.ground_tiles,
-            (-self.camera.offset_x, -self.camera.offset_y)
+        #self.screen.blit(
+        #    self.tilemap.ground_tiles,
+        #    (-self.camera.offset_x, -self.camera.offset_y)
+        #)
+        layers_by_height = {}
+        render_list = sorted(
+            ((entity.rect.bottom, entity) for entity in self.sprites),
+            key=lambda item: item[0],
         )
-
-        # Depth-sorted sprites
-        render_list = []
-
-        for spr in self.sprites:
-            depth = spr.rect.bottom
-            render_list.append((depth, spr))
-
-        for y, yc in enumerate(self.tilemap.tile_sprites):
-            for x, spr in enumerate(yc):
-                if spr:
-                    depth = spr.rect.bottom
-                    render_list.append((depth, spr))
-
-        render_list.sort(key=lambda x: x[0])
-
-        self.lighting.render_shadows(
+        shadow_layers = self.lighting.render_shadows(
             self.screen,
             self.camera,
             self.day_phase,
             render_list,
         )
 
-        for depth, spr in render_list:
-            self.screen.blit(
-                spr.surface,
-                self.camera.apply(spr.rect)
-            )
+        for height, surface in self.tilemap.height_layers.items():
+            layers_by_height.setdefault(height, []).append((None, surface))
+        for height, surface in shadow_layers.items():
+            layers_by_height.setdefault(height, []).append((None, surface))
+        for spr in self.sprites:
+            for height, surface in spr.split().items():
+                layers_by_height.setdefault(height, []).append((spr, surface))
 
-        # Priority layer
-        self.screen.blit(
-            self.tilemap.priority_tiles,
-            (-self.camera.offset_x, -self.camera.offset_y)
-        )
+        shadow_surface_ids = {id(surface) for surface in shadow_layers.values()}
+        gpu_layers = []
+        for height in sorted(layers_by_height):
+            for spr, surface in layers_by_height[height]:
+                if spr is None:
+                    pos = (-self.camera.offset_x, -self.camera.offset_y)
+                else:
+                    pos = self.camera.apply(spr.rect)
+                gpu_layers.append((surface, pos, id(surface) in shadow_surface_ids))
+
+        gpu_scene_ready = False
+        if self.gpu_display:
+            compositor = self.lighting._get_gpu_compositor()
+            if compositor is not None and not self.lighting._gpu_failed:
+                try:
+                    compositor.render_scene(gpu_layers, self.screen.get_size())
+                    gpu_scene_ready = True
+                except Exception as error:
+                    warnings.warn(
+                        f"GPU scene rendering failed; using Pygame composition: {error}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+
+        if not gpu_scene_ready:
+            for surface, pos, _ in gpu_layers:
+                self.screen.blit(surface, pos)
 
         phase = self.day_phase % 1.0
 
@@ -275,7 +299,8 @@ class App:
             self.ambient_overlay = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         self.ambient_overlay.fill(color)
 
-        self.screen.blit(self.ambient_overlay, (0,0))
+        if not gpu_scene_ready:
+            self.screen.blit(self.ambient_overlay, (0,0))
         if self.gpu_display:
             menu_overlay = None
             if self.menu is not None or self.dialogue_box is not None:
@@ -289,6 +314,8 @@ class App:
                 self.camera,
                 render_list,
                 overlay=menu_overlay,
+                scene_ready=gpu_scene_ready,
+                ambient_color=color if gpu_scene_ready else None,
             )
         else:
             self.lighting.render_lights(self.screen, self.camera, render_list)
@@ -299,10 +326,11 @@ class App:
         pygame.display.flip()
 
     def tick(self):
+        print(self.player.height, self.player.displacement)
         self.time = (self.time + 1) % self.day_length
         self.day_phase = self.time / self.day_length
         self.just_pressed.clear()
-        dt = self.clock.tick_busy_loop(self.settings.TARGET_FPS) / 1000.0
+        dt = self.clock.tick(self.settings.TARGET_FPS) / 1000.0
         if dt > 0:
             self.frame_times.append(dt)
         if len(self.frame_times) > self.max_tracked_frames:

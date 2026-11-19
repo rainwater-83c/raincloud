@@ -65,9 +65,10 @@ class Menu:
     corner_type: str = "rounded"
     edge_style: str = "straight"
     button_matrix: Matrix = (
-        (1, 1, 1, 1, 1, 1, 1, 1, 1),
-        (1, 1, 1, 1, 1, 1, 1, 1, 1),
-        (1, 1, 1, 1, 1, 1, 1, 1, 1),
+        (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+        (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+        (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
+        (1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
     )
     button_colors: Palette = (
         (26, 34, 45, 235),
@@ -257,8 +258,7 @@ DEFAULT_DIALOGUE_COLORS = (
     (232, 240, 245, 245),
 )
 DEFAULT_DIALOGUE_TEXT_COLOR = (245, 248, 250)
-INLINE_FONT_PATTERN = re.compile(r"<([^<>|]*)\|([^<>|]*)>")
-
+INLINE_FONT_PATTERN = re.compile(r"<([^<>]+)>")
 
 class DialogueBox:
     def __init__(self, app, entity, location, text, font, colors=None):
@@ -355,21 +355,23 @@ class DialogueBox:
         matches = list(INLINE_FONT_PATTERN.finditer(text))
         runs = []
         start = 0
-        glyph_font = self.fonts.get("glyph")
-        glyph_components = getattr(glyph_font, "GLYPH_COMPONENT_TO_INDEX", {})
         for match in matches:
             if match.start() > start:
                 runs.append((self.font, text[start:match.start()], "text"))
-            left = match.group(1).strip()
-            right = match.group(2).strip()
-            if left.upper() in glyph_components and right.upper() in glyph_components:
-                runs.append((glyph_font, (left, right), "pair"))
-            elif left in self.fonts:
-                runs.append((self._resolve_font(left), right, "font"))
-            elif glyph_font is not None:
-                runs.append((glyph_font, (left, right), "pair"))
+
+            inline = match.group(1).strip()
+            if ";" in inline:
+                font_name, inline_text = inline.split(";", 1)
+                run_font = self._resolve_font(font_name.strip())
+                runs.append((run_font, inline_text.strip(), "inline"))
+            elif "|" in inline:
+                left, right = (part.strip() for part in inline.split("|", 1))
+                if left in self.fonts:
+                    runs.append((self._resolve_font(left), right, "font"))
+                else:
+                    raise KeyError(f"Unknown inline font: <{inline}>")
             else:
-                raise KeyError(f"Unknown inline font or glyph pair: <{left}|{right}>")
+                raise KeyError(f"Unknown inline text tag: <{inline}>")
             start = match.end()
         if start < len(text) or not runs:
             runs.append((self.font, text[start:], "text"))
@@ -378,16 +380,18 @@ class DialogueBox:
         lines = [[]]
         line_widths = [0]
         for run_font, run_text, run_type in runs:
-            if run_type == "pair":
+            if run_type == "inline":
+                resolver = getattr(run_font, "resolve_inline", None)
+                if not callable(resolver):
+                    raise TypeError(f"Inline font {run_font.__class__.__name__} needs resolve_inline()")
                 characters = ("",)
-                glyphs = (run_font.get_glyph_pair(*run_text),)
+                glyphs = (resolver(run_text),)
+            elif run_type == "font":
+                characters = run_text
+                glyphs = self._text_glyphs(run_font, run_text)
             else:
                 characters = run_text
-                glyphs = (
-                    self._text_glyphs(run_font, run_text)
-                    if run_type == "font"
-                    else [self._render_character(run_font, char) for char in run_text]
-                )
+                glyphs = [self._render_character(run_font, char) for char in run_text]
             for character, glyph in zip(characters, glyphs):
                 if character == "\n":
                     lines.append([])
@@ -445,7 +449,17 @@ class MenuController:
         if not self.items:
             raise ValueError(f"Menu '{name}' must define at least one item")
 
-        self.selected = 0
+        self.sliders = self.definition.sliders
+        self.slider_values = [s.default for s in self.sliders]
+        self.slider_rects = []
+        self.active_slider = None  # index of slider currently being adjusted
+        self.total_items = len(self.items) + len(self.sliders)
+        if self.sliders:
+            # Start on the first adjustable control in menus that contain sliders.
+            self.selected = len(self.items)
+        else:
+            self.selected = 0
+
         self.gui = GUITexture()
         self.corner_type = self.definition.corner_type
         self.edge_style = self.definition.edge_style
@@ -503,7 +517,6 @@ class MenuController:
                     return True
                 elif action == "confirm":
                     if self._is_slider_selected():
-                        # Confirming on a slider just confirms its current value
                         pass
                     else:
                         self.activate()
@@ -513,7 +526,6 @@ class MenuController:
                     return True
                 else:
                     continue
-                return True
 
         elif event.type == pygame.KEYUP:
             for action, bindings in self.app.keybinds.items():
@@ -528,11 +540,18 @@ class MenuController:
                 if event.button not in bindings:
                     continue
                 if action == "up":
-                    self.selected = (self.selected - 1) % len(self.items)
+                    if self.total_items > 0:
+                        self.selected = (self.selected - 1) % self.total_items
                 elif action == "down":
-                    self.selected = (self.selected + 1) % len(self.items)
+                    if self.total_items > 0:
+                        self.selected = (self.selected + 1) % self.total_items
+                elif action == "left" and self.sliders and self._is_slider_selected():
+                    self._adjust_slider(self._slider_index(), -1)
+                elif action == "right" and self.sliders and self._is_slider_selected():
+                    self._adjust_slider(self._slider_index(), 1)
                 elif action == "confirm":
-                    self.activate()
+                    if not self._is_slider_selected():
+                        self.activate()
                 elif action == "deny":
                     self.app.close_menu()
                 else:
@@ -632,6 +651,45 @@ class MenuController:
 
     def _render_text(self, text: str, color: tuple[int, ...], size: int = 24) -> pygame.Surface:
         """Render text using the bitmap font if available, else pygame font."""
+        matches = list(INLINE_FONT_PATTERN.finditer(text))
+        if matches:
+            surfaces = []
+            cursor = 0
+            for match in matches:
+                if match.start() > cursor:
+                    surfaces.append(self._render_text_plain(text[cursor:match.start()], color, size))
+                inline = match.group(1).strip()
+                if ";" not in inline:
+                    raise KeyError(f"Inline text requires a font name: <{inline}>")
+                font_name, inline_text = inline.split(";", 1)
+                fonts = getattr(self.app, "dialogue_fonts", {})
+                run_font = fonts.get(font_name.strip())
+                resolver = getattr(run_font, "resolve_inline", None)
+                if not callable(resolver):
+                    raise KeyError(f"Unknown inline font or glyph resolver: {font_name.strip()!r}")
+                glyph = resolver(inline_text.strip())
+                if glyph.get_height() < size:
+                    scale = size / glyph.get_height()
+                    glyph = pygame.transform.scale(
+                        glyph,
+                        (max(1, int(glyph.get_width() * scale)), size),
+                    )
+                surfaces.append(glyph)
+                cursor = match.end()
+            if cursor < len(text):
+                surfaces.append(self._render_text_plain(text[cursor:], color, size))
+            height = max((surface.get_height() for surface in surfaces), default=size)
+            width = sum(surface.get_width() for surface in surfaces)
+            result = pygame.Surface((max(1, width), height), pygame.SRCALPHA, 32)
+            x = 0
+            for surface in surfaces:
+                result.blit(surface, (x, height - surface.get_height()))
+                x += surface.get_width()
+            return result
+        return self._render_text_plain(text, color, size)
+
+    def _render_text_plain(self, text: str, color: tuple[int, ...], size: int = 24) -> pygame.Surface:
+        """Render text using the bitmap font if available, else pygame font."""
         if self.bitmap_font is not None:
             try:
                 # Add character spacing so bitmap text isn't cramped
@@ -648,6 +706,14 @@ class MenuController:
         font = self.title_font if size > 24 else self.font
         return font.render(text, True, color)
 
+    def _format_slider_value(self, slider: Slider, value: float) -> str:
+        """Format slider values compactly, using percentages for normalized controls."""
+        if slider.min_value == 0.0 and slider.max_value == 1.0:
+            return f"{round(value * 100):d}%"
+        if abs(value - round(value)) < 1e-6:
+            return str(int(round(value)))
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
     def activate(self):
         item = self.items[self.selected]
         submenu = item.menu
@@ -659,85 +725,101 @@ class MenuController:
         elif action is not None:
             raise TypeError(f"Menu action for '{item.label}' must be callable")
 
+    def _fit_matrix_to_screen(self, screen) -> pygame.Surface:
+        """Resize the matrix in tile units, never by scaling rendered pixels."""
+        margin = 16
+        target_columns = max(3, (screen.get_width() - margin * 2) // TILE_SIZE)
+        target_rows = max(3, (screen.get_height() - margin * 2) // TILE_SIZE)
+
+        source_rows = len(self.definition.matrix)
+        source_columns = len(self.definition.matrix[0])
+        fitted = tuple(
+            tuple(
+                self.definition.matrix[
+                    min(source_rows - 1, row * source_rows // target_rows)
+                ][min(source_columns - 1, column * source_columns // target_columns)]
+                for column in range(target_columns)
+            )
+            for row in range(target_rows)
+        )
+        return self.gui.render(
+            fitted,
+            self.colors,
+            self.corner_type,
+            self.edge_style,
+        )
+
     def render(self, screen):
         overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 150))
         screen.blit(overlay, (0, 0))
 
-        panel_rect = self.panel_surface.get_rect(center=screen.get_rect().center)
-        screen.blit(self.panel_surface, panel_rect)
+        margin = 16
+        panel_surface = self._fit_matrix_to_screen(screen)
+        panel_rect = panel_surface.get_rect(center=screen.get_rect().center)
+        screen.blit(panel_surface, panel_rect)
 
         title = self._render_text(self.title, (242, 246, 249), size=32)
         screen.blit(title, title.get_rect(midtop=(panel_rect.centerx, panel_rect.top + 13)))
 
-        self.button_rects = []
-        button_y = panel_rect.top + 64
-        for index, (button_definition, surfaces) in enumerate(zip(self.items, self.button_surfaces)):
-            button = surfaces[index == self.selected]
-            if button_y + button.get_height() > panel_rect.bottom - 16:
-                break
-            rect = button.get_rect(midtop=(panel_rect.centerx, button_y))
-            screen.blit(button, rect)
-            label = self._render_text(button_definition.label, (245, 248, 250))
-            screen.blit(label, label.get_rect(center=rect.center))
-            self.button_rects.append(rect)
-            button_y += button.get_height() + 8
-
-        # Render sliders
+        # Sliders occupy the main settings area, with actions anchored below them.
         self.slider_rects = []
-        slider_y = button_y + 12
-
+        slider_y = panel_rect.top + 58
         for index, slider in enumerate(self.sliders):
-            if slider_y + 30 > panel_rect.bottom - 16:
+            if slider_y + 44 > panel_rect.bottom - 48:
                 break
 
             is_selected = self._is_slider_selected() and self._slider_index() == index
             is_active = self.active_slider == index
-
             if is_selected or is_active:
                 colors = self.definition.selected_slider_colors
                 label_color = (255, 255, 255)
             else:
                 colors = self.definition.slider_colors
-                label_color = (245, 248, 250)
+                label_color = (225, 232, 238)
 
-            # colors: (track_bg, track_fill, handle_idle, handle_active)
+            value_text = self._format_slider_value(slider, self.slider_values[index])
+            label_text = f"{slider.label}: {value_text}"
+            label_surface = self._render_text(label_text, label_color)
+            screen.blit(label_surface, label_surface.get_rect(midtop=(panel_rect.centerx, slider_y)))
 
-            # Slider label + value text
-            value_text = f"{slider.label}: {self.slider_values[index]:g}"
-            label_surface = self._render_text(value_text, label_color)
-            label_rect = label_surface.get_rect(midtop=(panel_rect.centerx, slider_y))
-            screen.blit(label_surface, label_rect)
-
-            # Slider track and handle
-            track_x = panel_rect.centerx - 100
-            track_y = slider_y + 16
-            track_width = 200
+            track_width = max(240, min(int(panel_rect.width * 0.62), 560))
+            track_x = panel_rect.centerx - track_width // 2
+            track_y = slider_y + 22
             track_height = 8
             handle_size = 16
 
+            hit_rect = pygame.Rect(track_x - 8, track_y - 4, track_width + 16, 16)
+            self.slider_rects.append(hit_rect)
             track_rect = pygame.Rect(track_x, track_y, track_width, track_height)
-            self.slider_rects.append(track_rect)
-
-            # Track background
             pygame.draw.rect(screen, colors[0], track_rect, border_radius=track_height // 2)
 
-            # Fill portion
             position = self._slider_value_to_position(index)
             fill_width = int(track_width * position)
             if fill_width > 0:
                 fill_rect = pygame.Rect(track_x, track_y, fill_width, track_height)
                 pygame.draw.rect(screen, colors[1], fill_rect, border_radius=track_height // 2)
 
-            # Handle
             handle_x = track_x + fill_width - handle_size // 2
             handle_y = track_y - (handle_size - track_height) // 2
             handle_rect = pygame.Rect(handle_x, handle_y, handle_size, handle_size)
             handle_color = colors[3] if (is_selected or is_active) else colors[2]
             pygame.draw.rect(screen, handle_color, handle_rect, border_radius=4)
-
-            # White outline around handle when selected or active
             if is_selected or is_active:
                 pygame.draw.rect(screen, (245, 248, 250), handle_rect, 2)
 
-            slider_y += 36
+            slider_y += 46
+
+        # Buttons are anchored at the bottom and use native tile-matrix sizes.
+        self.button_rects = []
+        button_y = panel_rect.bottom - 16
+        for index in range(len(self.items) - 1, -1, -1):
+            button_definition = self.items[index]
+            surfaces = self.button_surfaces[index]
+            button = surfaces[index == self.selected]
+            rect = button.get_rect(midbottom=(panel_rect.centerx, button_y))
+            screen.blit(button, rect)
+            label = self._render_text(button_definition.label, (245, 248, 250), size=32)
+            screen.blit(label, label.get_rect(center=rect.center))
+            self.button_rects.insert(0, rect)
+            button_y -= button.get_height() + 8

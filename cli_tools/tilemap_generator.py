@@ -28,7 +28,7 @@ with open(f"{name}.py", "w") as f:
     f.write(f"""
 format = {FORMAT}
 name = "{name}"
-content = {tilemap}
+tilemap = {tilemap}
 tileset = "{tileset}"
 """)
 

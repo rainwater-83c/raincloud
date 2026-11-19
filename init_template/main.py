@@ -29,7 +29,6 @@ def main():
     core_assets = core_loader.assets
     tilemap = Tilemap(
         module=core_assets["tilemap"],
-        tileset_module=core_assets["tileset"],
         sprite_definitions=core_assets["sprites"].sprites,
     )
     app = App(tilemap, core_assets, core_loader.config)

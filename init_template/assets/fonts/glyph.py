@@ -91,3 +91,14 @@ def get_glyph_pair(left: str, right: str) -> pygame.Surface:
 	except KeyError as error:
 		raise KeyError(f"Unknown glyph pair: <{left}|{right}>") from error
 	return get_glyph(index)
+
+
+def resolve_inline(value: str) -> pygame.Surface:
+	"""Resolve inline glyph syntax such as ``A|A`` or ``glyph;A|A``."""
+	value = value.strip()
+	if value.startswith("glyph;"):
+		value = value[len("glyph;"):].strip()
+	if "|" not in value:
+		raise KeyError(f"Inline glyph requires left and right components: {value!r}")
+	left, right = value.split("|", 1)
+	return get_glyph_pair(left, right)

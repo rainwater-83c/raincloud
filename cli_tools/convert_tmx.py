@@ -49,6 +49,6 @@ with open(f"{name}.py", "w") as f:
 format = {FORMAT}
 name = "{name}"
 tile_sprites = "{[]}"
-content = {tilemap}
+tilemap = {tilemap}
 tileset = "{tileset}"
 """)
